@@ -207,11 +207,16 @@ impl CFGR {
         while rcc.cr.read().hserdy().bit_is_clear() {}
 
         // Enable PLL2 (= pll3 on stm32), and setup predv1 (= prediv2 on stm32)
-        // PLL2 runs at (8 / 3) * 20 Mhz = 53.33.. Mhz
+        // PLL2 runs at (8 / 2) * 12 Mhz = 48 Mhz
+        // PLL2 will drive ckout0 at 48 MHz for ethernet at 48/2 = 24 MHz
         rcc.cfgr2
-            .modify(|_, w| w.pll3mul().mul20().prediv2().div3());
+            .modify(|_, w| w.prediv2().div2().pll3mul().mul12());
         rcc.cr.modify(|_, w| w.pll3on().set_bit());
         while rcc.cr.read().pll3rdy().bit_is_clear() {}
+
+        // Use PLL2 as ckout0 (= MCO on stm32) to clock ethernet
+        rcc.cfgr
+            .modify(|r, w| unsafe { w.bits(0b1011 << 24 | r.bits()) });
 
         // Enable IRC8M (= hsi on stm32)
         rcc.cr.modify(|_, w| w.hsion().set_bit());
@@ -243,10 +248,6 @@ impl CFGR {
         // Enable PLL
         rcc.cr.modify(|_, w| w.pllon().set_bit());
         while rcc.cr.read().pllrdy().bit_is_clear() {}
-
-        // Use PLL2 as ckout0 (= MCO on stm32) to clock ethernet
-        rcc.cfgr
-            .modify(|r, w| unsafe { w.bits(0b1011 << 24 | r.bits()) });
 
         while !rcc.cfgr.read().sws().is_pll() {}
 
