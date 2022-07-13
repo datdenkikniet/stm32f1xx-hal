@@ -186,6 +186,73 @@ impl CFGR {
         Self::_freeze_with_config(cfg, acr)
     }
 
+    #[inline(always)]
+    #[cfg(feature = "stm32f107")]
+    pub fn freeze_gd32f107_100_mhz(self, _: &mut ACR) -> Clocks {
+        let rcc = unsafe { &*RCC::ptr() };
+
+        let clocks = Clocks {
+            hclk: 108.MHz(),
+            pclk1: 54.MHz(),
+            pclk2: 108.MHz(),
+            ppre1: 2,
+            ppre2: 1,
+            sysclk: 108.MHz(),
+            adcclk: 13_500.kHz(),
+            usbclk_valid: false,
+        };
+
+        // Enable HXTAL
+        rcc.cr.modify(|_, w| w.hseon().set_bit());
+        while rcc.cr.read().hserdy().bit_is_clear() {}
+
+        // Enable PLL2 (= pll3 on stm32), and setup predv1 (= prediv2 on stm32)
+        // PLL2 runs at (8 / 3) * 20 Mhz = 53.33.. Mhz
+        rcc.cfgr2
+            .modify(|_, w| w.pll3mul().mul20().prediv2().div3());
+        rcc.cr.modify(|_, w| w.pll3on().set_bit());
+        while rcc.cr.read().pll3rdy().bit_is_clear() {}
+
+        // Enable IRC8M (= hsi on stm32)
+        rcc.cr.modify(|_, w| w.hsion().set_bit());
+        while rcc.cr.read().hsirdy().bit_is_clear() {}
+
+        // Configure PLL as sys_ck source (sys_ck = sysclk on stm32)
+        // set APB1 prescaler to 2 (for SYS_CK/2 = 54) (= ppre1 on stm32)
+        // Set APB2 prescaler to 1 (for SYS_CK/1 = 108) (= ppre2 on stm32)
+        // Set ADC prescaler to 8 (for SYS_CK/8 = 13.5)
+        rcc.cfgr.modify(|_, w| {
+            w.sw()
+                .pll()
+                .hpre()
+                .div1()
+                .ppre1()
+                .div2()
+                .ppre2()
+                .div1()
+                .adcpre()
+                .div8()
+        });
+        // Configure PLL with a predivision of 27, and to use IRC8M/2 as source
+        rcc.cfgr
+            .modify(|_, w| unsafe { w.pllsrc().hsi_div2().pllmul().bits(0b1010) });
+        // Set last multiplication bit to achieve 27 predevision
+        rcc.cfgr
+            .modify(|r, w| unsafe { w.bits(1 << 29 | r.bits()) });
+
+        // Enable PLL
+        rcc.cr.modify(|_, w| w.pllon().set_bit());
+        while rcc.cr.read().pllrdy().bit_is_clear() {}
+
+        // Use PLL2 as ckout0 (= MCO on stm32) to clock ethernet
+        rcc.cfgr
+            .modify(|r, w| unsafe { w.bits(0b1011 << 24 | r.bits()) });
+
+        while !rcc.cfgr.read().sws().is_pll() {}
+
+        clocks
+    }
+
     #[allow(unused_variables)]
     fn _freeze_with_config(cfg: Config, acr: &mut ACR) -> Clocks {
         let clocks = cfg.get_clocks();
