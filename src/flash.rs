@@ -80,6 +80,14 @@ impl<'a> FlashWriter<'a> {
             self.flash.keyr.keyr().write(|w| w.key().bits(KEY2));
         }
 
+        // For no apparent reason, reading the `lock` bit immediately after writing
+        // the `keyr` registers may result in the `lock` bit still being set, despite
+        // a correct unlock sequence.
+        //
+        // Introducing a 1-cycle delay solves this issue. Perhaps it is related to the
+        // issue described in 2.2.8 of the errata for stm32f1
+        cortex_m::asm::nop();
+
         // Verify success
         match self.flash.cr.cr().read().lock().bit_is_clear() {
             true => Ok(()),
