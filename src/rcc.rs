@@ -202,6 +202,12 @@ impl CFGR {
             usbclk_valid: false,
         };
 
+        // Set the source of predv0 (= prediv1 on stm32) to
+        // HXTAL.
+        // Set predv0 to 2 to get out the 4 MHz
+        rcc.cfgr2
+            .modify(|_, w| w.prediv1src().hse().prediv1().div2());
+
         // Enable HXTAL
         rcc.cr.modify(|_, w| w.hseon().set_bit());
         while rcc.cr.read().hserdy().bit_is_clear() {}
@@ -210,7 +216,7 @@ impl CFGR {
         // PLL2 runs at (8 / 2) * 12 Mhz = 48 Mhz
         // PLL2 will drive ckout0 at 48 MHz for ethernet at 48/2 = 24 MHz
         rcc.cfgr2
-            .modify(|_, w| w.prediv2().div2().pll3mul().mul12());
+            .modify(|_, w| w.pll3mul().mul12().prediv2().div2());
         rcc.cr.modify(|_, w| w.pll3on().set_bit());
         while rcc.cr.read().pll3rdy().bit_is_clear() {}
 
@@ -218,10 +224,7 @@ impl CFGR {
         rcc.cfgr
             .modify(|r, w| unsafe { w.bits(0b1011 << 24 | r.bits()) });
 
-        // Enable IRC8M (= hsi on stm32)
-        rcc.cr.modify(|_, w| w.hsion().set_bit());
-        while rcc.cr.read().hsirdy().bit_is_clear() {}
-
+        // Configure PLL to use HXTAL divided by predv0 (= 4 MHz) as source
         // Configure PLL as sys_ck source (sys_ck = sysclk on stm32)
         // set APB1 prescaler to 2 (for SYS_CK/2 = 54) (= ppre1 on stm32)
         // Set APB2 prescaler to 1 (for SYS_CK/1 = 108) (= ppre2 on stm32)
@@ -237,13 +240,14 @@ impl CFGR {
                 .div1()
                 .adcpre()
                 .div8()
+                .pllsrc()
+                .hse_div_prediv()
         });
-        // Configure PLL with a predivision of 27, and to use IRC8M/2 as source
+
+        // Set PLL multiplication factor to 27 to get
+        // (8/2) * 27 = 108 MHz
         rcc.cfgr
-            .modify(|_, w| unsafe { w.pllsrc().hsi_div2().pllmul().bits(0b1010) });
-        // Set last multiplication bit to achieve 27 predevision
-        rcc.cfgr
-            .modify(|r, w| unsafe { w.bits(1 << 29 | r.bits()) });
+            .modify(|r, w| unsafe { w.bits(1 << 29 | 0b1010 << 18 | r.bits()) });
 
         // Enable PLL
         rcc.cr.modify(|_, w| w.pllon().set_bit());
